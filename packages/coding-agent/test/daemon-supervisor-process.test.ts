@@ -412,7 +412,7 @@ describe("daemon supervisor resident workers", () => {
 			sessionPath: parentSessionFile,
 			config: { cwd: projectDir, agentDir, sessionDir, noTools: true, noExtensions: true },
 		});
-		expect(created.success).toBe(true);
+		expect(created.success, created.success ? undefined : created.error).toBe(true);
 		const parentSummary = requireSummary(created.success ? created.data : undefined);
 		if (!parentSummary.workerPid) throw new Error("Parent worker did not expose its pid");
 		workerPids.add(parentSummary.workerPid);

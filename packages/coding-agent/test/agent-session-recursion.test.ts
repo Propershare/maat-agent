@@ -2766,8 +2766,9 @@ describe("AgentSession rlm recursion", () => {
 	});
 
 	it("lets a stale kernel depth cap defer to the live host gate", () => {
-		const python =
-			process.env.PRIME_AGENT_KERNEL_PYTHON ?? join(homedir(), ".prime", "agent", "kernel-venv", "bin", "python");
+		const configuredPython = process.env.PRIME_AGENT_KERNEL_PYTHON;
+		const labKernelPython = join(homedir(), ".prime", "agent", "kernel-venv", "bin", "python");
+		const python = configuredPython ?? (existsSync(labKernelPython) ? labKernelPython : "python3");
 		const runtime = join(process.cwd(), "..", "..", "prime-agent-runtime", "src");
 		const probe = spawnSync(
 			python,
@@ -2777,10 +2778,12 @@ describe("AgentSession rlm recursion", () => {
 				encoding: "utf8",
 			},
 		);
+		const stderr = probe.stderr ?? "";
 
+		expect(probe.error, probe.error ? String(probe.error) : undefined).toBeUndefined();
 		expect(probe.status).not.toBe(0);
-		expect(probe.stderr).toContain("Jupyter comm support is unavailable in this kernel");
-		expect(probe.stderr).not.toContain("RLM recursion depth limit reached");
+		expect(stderr).toContain("Jupyter comm support is unavailable in this kernel");
+		expect(stderr).not.toContain("RLM recursion depth limit reached");
 	});
 
 	it("rejects child creation at the configured recursion depth cap", async () => {
