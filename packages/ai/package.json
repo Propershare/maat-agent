@@ -65,10 +65,12 @@
 	"scripts": {
 		"clean": "shx rm -rf dist",
 		"generate-models": "npx tsx scripts/generate-models.ts",
-		"build": "npm run generate-models && tsgo -p tsconfig.build.json",
+		"build": "tsgo -p tsconfig.build.json",
+		"build:models": "npm run generate-models && tsgo -p tsconfig.build.json",
 		"dev": "tsgo -p tsconfig.build.json --watch --preserveWatchOutput",
 		"dev:tsc": "tsgo -p tsconfig.build.json --watch --preserveWatchOutput",
 		"test": "vitest --run",
+		"test:providers:ollama": "RUN_OLLAMA_INTEGRATION=1 vitest --run test/stream.test.ts test/context-overflow.test.ts",
 		"prepublishOnly": "npm run clean && npm run build"
 	},
 	"dependencies": {

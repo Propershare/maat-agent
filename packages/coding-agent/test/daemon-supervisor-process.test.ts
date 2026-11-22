@@ -1,4 +1,4 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -248,11 +248,28 @@ async function waitForExit(child: ChildProcess): Promise<void> {
 	});
 }
 
+function isZombieProcess(pid: number): boolean {
+	try {
+		const stat = execFileSync("ps", ["-o", "stat=", "-p", String(pid)], {
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"],
+		}).trim();
+		return stat.startsWith("Z");
+	} catch {
+		return false;
+	}
+}
+
 async function waitForProcessGone(pid: number): Promise<void> {
 	const deadline = Date.now() + 10_000;
 	while (Date.now() < deadline) {
 		try {
 			process.kill(pid, 0);
+			// A zombie has released its process resources and is only waiting for
+			// its parent to reap it; kill(0) still succeeds for that state.
+			if (isZombieProcess(pid)) {
+				return;
+			}
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code === "ESRCH") {
 				return;
