@@ -1,7 +1,8 @@
 // biome-ignore-all lint/suspicious/noThenProperty: the Ma'at policy schema defines the rule outcome as "then".
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { type ActionBinding, type SecurityConfig, validateActionSecurity } from "./security.js";
 
 export type AgentRing = "inner-ring" | "middle-ring" | "outer-ring";
 
@@ -46,12 +47,24 @@ export interface GuardRequest {
 	action: string;
 	resource: string;
 	params: unknown;
+	actionId?: string;
+	correlationId?: string;
+	argumentHash?: string;
+	policyVersion?: string;
+	metadata?: Record<string, unknown>;
 }
 
 export interface GuardVerdict {
 	decision: GuardWireDecision;
 	reason: string;
 	policyId?: string;
+	policyVersion?: string;
+	correlationId?: string;
+	explanationId?: string;
+	matchedRules?: string[];
+	severity?: string;
+	blockingActions?: string[];
+	evidence?: Record<string, unknown>;
 }
 
 export interface EvidenceInput {
@@ -63,6 +76,13 @@ export interface EvidenceInput {
 	decision: "allow" | "deny";
 	outcome: "authorized" | "denied" | "executed" | "failed";
 	reason: string;
+	actionId?: string;
+	correlationId?: string;
+	policyVersion?: string;
+	argumentHash?: string;
+	guardExplanationId?: string;
+	nonce?: string;
+	expiresAt?: number;
 }
 
 export interface EvidenceReceipt extends EvidenceInput {
@@ -78,6 +98,12 @@ export interface GovernedToolRequest {
 	toolName: string;
 	params: unknown;
 	resource?: string;
+	actionId?: string;
+	correlationId?: string;
+	argumentHash?: string;
+	policyVersion?: string;
+	sessionId?: string;
+	security?: ActionBinding;
 }
 
 export type ToolHandler = (params: unknown) => Promise<unknown>;
@@ -339,6 +365,7 @@ export class GovernedToolRuntime {
 			guard: TehutiGuard;
 			evidence: GitMaatEvidenceLog;
 			tools: Map<string, ToolHandler>;
+			security?: SecurityConfig;
 		},
 	) {}
 
@@ -346,10 +373,59 @@ export class GovernedToolRuntime {
 		const actor = this.options.policy.getIdentity(request.actorId);
 		const action = "tool." + request.toolName;
 		const resource = request.resource ?? "";
+		const binding = request.security;
+		if (binding) {
+			const validation = validateActionSecurity(request, binding, actor.ring, this.options.security);
+			if (!validation.ok) {
+				const deniedPolicy = this.options.policy.evaluate(request.actorId, action, resource);
+				const deniedGuard: GuardVerdict = { decision: "deny", reason: validation.reason };
+				const receipt = await this.options.evidence.append({
+					actorId: actor.agentId,
+					actorRing: actor.ring,
+					action,
+					resource,
+					toolName: request.toolName,
+					decision: "deny",
+					outcome: "denied",
+					reason: validation.reason,
+					actionId: binding.actionId,
+					correlationId: binding.correlationId,
+					argumentHash: binding.argumentHash,
+					nonce: binding.nonce,
+					expiresAt: binding.expiresAt,
+				});
+				return {
+					request,
+					allowed: false,
+					reason: validation.reason,
+					policy: deniedPolicy,
+					guard: deniedGuard,
+					receipt,
+				};
+			}
+		}
+		const actionId = binding?.actionId ?? request.actionId ?? randomUUID();
+		const correlationId = binding?.correlationId ?? request.correlationId ?? randomUUID();
+		const argumentHash = binding?.argumentHash ?? request.argumentHash;
 		const policy = this.options.policy.evaluate(request.actorId, action, resource);
 		let guard: GuardVerdict;
 		try {
-			guard = await this.options.guard.decide({ actor, action, resource, params: request.params });
+			guard = await this.options.guard.decide({
+				actor,
+				action,
+				resource,
+				params: request.params,
+				actionId,
+				correlationId,
+				argumentHash,
+				policyVersion: request.policyVersion,
+				metadata: {
+					sessionId: request.sessionId,
+					nonce: binding?.nonce,
+					expiresAt: binding?.expiresAt,
+					delegation: binding?.delegation,
+				},
+			});
 		} catch (error) {
 			guard = {
 				decision: "deny",
@@ -369,6 +445,13 @@ export class GovernedToolRuntime {
 			decision: "deny",
 			outcome: "denied",
 			reason: guard.reason,
+			actionId,
+			correlationId,
+			policyVersion: guard.policyVersion ?? request.policyVersion,
+			argumentHash,
+			guardExplanationId: guard.explanationId,
+			nonce: binding?.nonce,
+			expiresAt: binding?.expiresAt,
 		});
 		return { request, allowed: false, reason: guard.reason, policy, guard, receipt };
 	}
@@ -384,6 +467,13 @@ export class GovernedToolRuntime {
 			decision: "allow",
 			outcome: isError ? "failed" : "executed",
 			reason: isError ? "Tool execution failed after authorization" : authorized.reason,
+			actionId: authorized.request.security?.actionId ?? authorized.request.actionId,
+			correlationId: authorized.request.security?.correlationId ?? authorized.request.correlationId,
+			policyVersion: authorized.guard.policyVersion ?? authorized.request.policyVersion,
+			argumentHash: authorized.request.security?.argumentHash ?? authorized.request.argumentHash,
+			guardExplanationId: authorized.guard.explanationId,
+			nonce: authorized.request.security?.nonce,
+			expiresAt: authorized.request.security?.expiresAt,
 		});
 	}
 
@@ -410,6 +500,10 @@ export class GovernedToolRuntime {
 				decision: "deny",
 				outcome: "denied",
 				reason: "No governed tool implementation registered",
+				actionId: request.actionId,
+				correlationId: request.correlationId,
+				policyVersion: request.policyVersion,
+				argumentHash: request.argumentHash,
 			});
 			return {
 				ok: false,
