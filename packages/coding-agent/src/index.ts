@@ -273,6 +273,9 @@ export {
 	truncateTail,
 	withFileMutationQueue,
 } from "./core/tools/index.js";
+export * from "./governance/broker.js";
+export * from "./governance/sandbox-provisioner.js";
+export * from "./governance/security-broker-server.js";
 // Main entry point
 export { type MainOptions, main } from "./main.js";
 export {
