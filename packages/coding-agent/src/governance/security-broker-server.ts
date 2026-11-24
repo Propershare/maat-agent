@@ -37,7 +37,9 @@ export class SecurityBrokerServer {
 		await mkdir(dirname(this.options.socketPath), { recursive: true, mode: 0o700 });
 		try {
 			await unlink(this.options.socketPath);
-		} catch {}
+		} catch {
+			// Socket path may not exist; cleanup is best effort.
+		}
 		this.server = createServer((socket) => {
 			let buffer = "";
 			socket.setEncoding("utf8");
@@ -85,6 +87,8 @@ export class SecurityBrokerServer {
 		await new Promise<void>((resolve) => server.close(() => resolve()));
 		try {
 			await unlink(this.options.socketPath);
-		} catch {}
+		} catch {
+			// Socket path may not exist; cleanup is best effort.
+		}
 	}
 }

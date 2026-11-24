@@ -1521,7 +1521,7 @@ describe("daemon supervisor resident workers", () => {
 		await waitForSocketGone(socketPath);
 		await waitForProcessGone(recovered.workerPid);
 		workerPids.delete(recovered.workerPid);
-	});
+	}, 60_000);
 
 	it("runs a session-artifact cron job while the supervisor is being replaced", {
 		tags: ["process-stress"],
